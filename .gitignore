@@ -1,0 +1,15 @@
+# runtime
+.run/
+*.log
+
+# dependencies
+node_modules/
+
+# private content
+notes/
+.env
+.secrets/
+
+# system
+.DS_Store
+Thumbs.db

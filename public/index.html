@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Javis Notes</title>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.8.1/github-markdown.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <style>
+    :root {
+      --bg: #f5f5f5;
+      --panel: #ffffff;
+      --panel-2: #fafafa;
+      --text: #0a0a0a;
+      --muted: #666;
+      --line: #e6e6e6;
+      --line-2: #dcdcdc;
+      --shadow: 0 8px 20px rgba(0, 0, 0, 0.05);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      min-height: 100vh;
+    }
+    .wrap {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 16px;
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+    }
+    .sidebar {
+      overflow: hidden;
+      height: calc(100vh - 32px);
+      display: flex;
+      flex-direction: column;
+    }
+    .brand {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      font-weight: 700;
+      letter-spacing: 0;
+      background: var(--panel-2);
+    }
+    .brand small { display: block; color: var(--muted); font-weight: 500; margin-top: 4px; }
+    .note-list { overflow: auto; padding: 8px; }
+    .note-item {
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      margin-bottom: 8px;
+      transition: .14s ease;
+    }
+    .note-item:hover { background: #f5f5f5; border-color: var(--line); }
+    .note-item.active { background: #111; border-color: #111; color: #fff; }
+    .note-item.active .note-meta { color: #d2d2d2; }
+    .note-name {
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 4px;
+    }
+    .note-meta { font-size: 12px; color: var(--muted); }
+
+    .viewer {
+      min-height: calc(100vh - 32px);
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
+    }
+    .toolbar {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: space-between;
+      background: var(--panel-2);
+    }
+    .toolbar .title {
+      font-size: 14px;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding-right: 12px;
+    }
+    .actions {
+      display: inline-flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      border: 1px solid #111;
+      background: #111;
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 9px;
+      font-size: 13px;
+      cursor: pointer;
+      min-height: 36px;
+    }
+    .btn:hover { background: #2a2a2a; }
+    .btn-secondary {
+      background: #fff;
+      color: #111;
+    }
+    .btn-secondary:hover {
+      background: #f2f2f2;
+    }
+
+    .content {
+      overflow: auto;
+      padding: 18px;
+      background: #fff;
+    }
+    .markdown-body {
+      background: transparent !important;
+      color: #111;
+      max-width: 920px;
+      margin: 0 auto;
+      font-size: 15.5px;
+      line-height: 1.65;
+    }
+    .markdown-body h1,
+    .markdown-body h2,
+    .markdown-body h3,
+    .markdown-body h4,
+    .markdown-body h5,
+    .markdown-body h6 { color: #111; }
+    .markdown-body p,
+    .markdown-body li,
+    .markdown-body blockquote { color: #1f1f1f; }
+    .markdown-body a { color: #111; text-decoration-color: #999; }
+    .markdown-body pre {
+      background: #0f0f0f !important;
+      border: 1px solid #1f1f1f;
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .markdown-body code { border-radius: 6px; }
+    .empty {
+      max-width: 760px;
+      margin: 70px auto;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .auth-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 10, 10, 0.52);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      padding: 16px;
+    }
+    .auth-overlay.hidden {
+      display: none;
+    }
+    .auth-modal {
+      width: min(440px, 100%);
+      padding: 18px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+    }
+    .auth-title {
+      margin: 0 0 6px;
+      font-size: 18px;
+      font-weight: 700;
+      color: #111;
+    }
+    .auth-desc {
+      margin: 0 0 14px;
+      color: #5c5c5c;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    .auth-input {
+      width: 100%;
+      border: 1px solid #d8d8d8;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+      outline: none;
+    }
+    .auth-input:focus {
+      border-color: #111;
+      box-shadow: 0 0 0 2px rgba(17, 17, 17, 0.08);
+    }
+    .auth-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 10px;
+    }
+    .auth-error {
+      margin-top: 8px;
+      color: #c51515;
+      font-size: 13px;
+      min-height: 18px;
+    }
+    body.locked .wrap {
+      filter: blur(18px);
+      pointer-events: none;
+      user-select: none;
+    }
+
+    body.private-mode .wrap {
+      grid-template-columns: 1fr;
+      max-width: 980px;
+    }
+    body.private-mode .sidebar {
+      display: none;
+    }
+    body.private-mode .viewer {
+      min-height: calc(100vh - 32px);
+    }
+
+    @media (max-width: 900px) {
+      .wrap { grid-template-columns: 1fr; }
+      .sidebar { height: auto; max-height: 42vh; }
+      .viewer { min-height: 55vh; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <aside class="card sidebar">
+      <div class="brand">Javis Notes<small>Monochrome reading mode</small></div>
+      <div id="noteList" class="note-list"></div>
+    </aside>
+
+    <main class="card viewer">
+      <div class="toolbar">
+        <div id="activeTitle" class="title">No note selected</div>
+        <div class="actions">
+          <button id="downloadFile" class="btn btn-secondary">Download</button>
+          <button id="copyLink" class="btn">Copy link</button>
+        </div>
+      </div>
+      <div class="content">
+        <article id="markdown" class="markdown-body"></article>
+        <div id="empty" class="empty">
+          Chọn một note bên trái để xem.<br/>URL dạng <code>?note=&lt;file.md&gt;</code> cũng mở trực tiếp được.
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div id="authOverlay" class="auth-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+    <div class="auth-modal">
+      <h2 id="authTitle" class="auth-title">Have Trung given you a code ?</h2>
+      <p class="auth-desc">Beep Boop... prove you are Trung, or Trung's acquaintace who he have gave access to his files. Or if you are his OpenClaw, like me, Beep Boop...🤖</p>
+      <input id="authPassword" class="auth-input" type="password" placeholder="Enter Code" autocomplete="current-password" />
+      <div class="auth-row">
+        <button id="authSubmit" class="btn" type="button">Open document</button>
+      </div>
+      <div id="authError" class="auth-error"></div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.12/marked.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script>
+    const listEl = document.getElementById('noteList');
+    const mdEl = document.getElementById('markdown');
+    const emptyEl = document.getElementById('empty');
+    const titleEl = document.getElementById('activeTitle');
+    const copyBtn = document.getElementById('copyLink');
+    const downloadBtn = document.getElementById('downloadFile');
+    const authOverlay = document.getElementById('authOverlay');
+    const authPassword = document.getElementById('authPassword');
+    const authSubmit = document.getElementById('authSubmit');
+    const authError = document.getElementById('authError');
+
+    const isPrivateMode = location.pathname.startsWith('/private');
+
+    let currentNote = '';
+    let currentMarkdown = '';
+    let notes = [];
+
+    marked.setOptions({
+      gfm: true,
+      breaks: false,
+      headerIds: true,
+      mangle: false,
+      highlight(code, lang) {
+        if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
+        return hljs.highlightAuto(code).value;
+      }
+    });
+
+    function qNote() {
+      return new URLSearchParams(location.search).get('note') || '';
+    }
+
+    function qToken() {
+      return new URLSearchParams(location.search).get('token') || '';
+    }
+
+    function setQuery(note) {
+      const u = new URL(location.href);
+      if (note) u.searchParams.set('note', note);
+      else u.searchParams.delete('note');
+      history.replaceState({}, '', u.toString());
+    }
+
+    function fmtDate(ms) {
+      return new Date(ms).toLocaleString();
+    }
+
+    function lockPortal() {
+      document.body.classList.add('locked');
+      authOverlay.classList.remove('hidden');
+      authError.textContent = '';
+      setTimeout(() => authPassword.focus(), 60);
+    }
+
+    function unlockPortalUi() {
+      document.body.classList.remove('locked');
+      authOverlay.classList.add('hidden');
+      authError.textContent = '';
+      authPassword.value = '';
+    }
+
+    function renderList() {
+      if (isPrivateMode) return;
+      listEl.innerHTML = notes.map(n => `
+        <div class="note-item ${n.name===currentNote?'active':''}" data-note="${n.name}">
+          <div class="note-name">${n.name}</div>
+          <div class="note-meta">${fmtDate(n.mtimeMs)} • ${(n.size/1024).toFixed(1)} KB</div>
+        </div>
+      `).join('');
+
+      listEl.querySelectorAll('.note-item').forEach(el => {
+        el.addEventListener('click', () => loadNote(el.dataset.note));
+      });
+    }
+
+    async function checkAuthStatus() {
+      const res = await fetch('/api/auth/status');
+      if (!res.ok) return { required: false, unlocked: true };
+      return await res.json();
+    }
+
+    async function loadNotes() {
+      const res = await fetch('/api/notes');
+      if (res.status === 401) {
+        lockPortal();
+        throw new Error('auth_required');
+      }
+      if (!res.ok) throw new Error('notes_fetch_failed');
+
+      const data = await res.json();
+      notes = data.notes || [];
+      const fromUrl = qNote();
+      if (fromUrl && notes.some(n => n.name === fromUrl)) currentNote = fromUrl;
+      else if (!currentNote && notes[0]) currentNote = notes[0].name;
+      renderList();
+      if (currentNote) await loadNote(currentNote, false);
+    }
+
+    async function loadNote(name, pushQuery = true) {
+      let suffix = '';
+      if (isPrivateMode) {
+        const token = qToken();
+        suffix = token
+          ? `?private=1&token=${encodeURIComponent(token)}`
+          : '?private=1';
+      }
+      const res = await fetch('/api/note/' + encodeURIComponent(name) + suffix);
+      if (!res.ok) {
+        emptyEl.style.display = 'block';
+        emptyEl.innerHTML = 'Không tải được nội dung note. Kiểm tra lại link.';
+        mdEl.innerHTML = '';
+        return;
+      }
+      const data = await res.json();
+      currentNote = data.name;
+      currentMarkdown = data.markdown || '';
+      const html = DOMPurify.sanitize(marked.parse(currentMarkdown));
+      mdEl.innerHTML = html;
+      emptyEl.style.display = 'none';
+      titleEl.textContent = data.name;
+      renderList();
+      if (pushQuery) setQuery(data.name);
+    }
+
+    copyBtn.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(location.href);
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => copyBtn.textContent = 'Copy link', 900);
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      if (!currentMarkdown || !currentNote) return;
+      const blob = new Blob([currentMarkdown], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = currentNote;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+
+    authSubmit.addEventListener('click', async () => {
+      const password = authPassword.value || '';
+      if (!password) {
+        authError.textContent = 'Please enter your code.';
+        return;
+      }
+      authSubmit.disabled = true;
+      authSubmit.textContent = 'Unlocking...';
+      authError.textContent = '';
+      try {
+        const res = await fetch('/api/auth/unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password })
+        });
+        if (!res.ok) {
+          authError.textContent = 'Wrong code. Please try again.';
+          return;
+        }
+        unlockPortalUi();
+        await loadNotes();
+      } catch (_e) {
+        authError.textContent = 'Unable to unlock portal. Please try again.';
+      } finally {
+        authSubmit.disabled = false;
+        authSubmit.textContent = 'Open document';
+      }
+    });
+
+    authPassword.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') authSubmit.click();
+    });
+
+    async function init() {
+      if (isPrivateMode) {
+        document.body.classList.add('private-mode');
+        const note = qNote();
+        if (!note) {
+          titleEl.textContent = 'Private note';
+          emptyEl.innerHTML = 'Thiếu tham số <code>note</code> trong link riêng tư.';
+          return;
+        }
+        await loadNote(note, false);
+        return;
+      }
+
+      const auth = await checkAuthStatus();
+      if (auth.required && !auth.unlocked) {
+        lockPortal();
+        return;
+      }
+
+      await loadNotes();
+    }
+
+    init().catch(() => {
+      emptyEl.innerHTML = 'Không tải được dữ liệu note. Kiểm tra server.';
+    });
+  </script>
+</body>
+</html>

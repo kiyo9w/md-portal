@@ -1,0 +1,15 @@
+{
+  "name": "md-portal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ee-first": "^1.1.1",
+    "express": "^4.22.1",
+    "finalhandler": "^2.1.1",
+    "on-finished": "^2.4.1"
+  }
+}
