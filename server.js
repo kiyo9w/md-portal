@@ -18,10 +18,19 @@ const AUTH_COOKIE = 'md_portal_auth';
 const AUTH_TOKEN = PORTAL_PASSWORD
   ? crypto.createHash('sha256').update(PORTAL_PASSWORD).digest('hex').slice(0, 32)
   : '';
+const AUTH_MAX_FAIL = Number(process.env.AUTH_MAX_FAIL || 8);
+const AUTH_LOCK_MS = Number(process.env.AUTH_LOCK_MS || 5 * 60 * 1000);
+const authAttempts = new Map();
 
 if (!fs.existsSync(NOTES_DIR)) fs.mkdirSync(NOTES_DIR, { recursive: true });
 
+app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 function safeName(input) {
@@ -43,10 +52,54 @@ function parseCookies(req) {
   }, {});
 }
 
+function secureEqual(a, b) {
+  const ha = crypto.createHash('sha256').update(String(a || '')).digest();
+  const hb = crypto.createHash('sha256').update(String(b || '')).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+
+function getClientIp(req) {
+  const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return fwd || req.socket?.remoteAddress || 'unknown';
+}
+
+function isAuthLimited(req) {
+  const ip = getClientIp(req);
+  const st = authAttempts.get(ip);
+  if (!st) return { limited: false, retryAfterMs: 0 };
+  if (Date.now() >= st.until) {
+    authAttempts.delete(ip);
+    return { limited: false, retryAfterMs: 0 };
+  }
+  return { limited: true, retryAfterMs: Math.max(0, st.until - Date.now()) };
+}
+
+function markAuthFailure(req) {
+  const ip = getClientIp(req);
+  const now = Date.now();
+  const st = authAttempts.get(ip) || { count: 0, until: now };
+  st.count += 1;
+  st.until = st.count >= AUTH_MAX_FAIL ? (now + AUTH_LOCK_MS) : now;
+  authAttempts.set(ip, st);
+}
+
+function clearAuthFailure(req) {
+  const ip = getClientIp(req);
+  authAttempts.delete(ip);
+}
+
 function hasPortalAccess(req) {
   if (!PORTAL_PASSWORD) return true;
   const cookies = parseCookies(req);
-  return cookies[AUTH_COOKIE] === AUTH_TOKEN;
+  return secureEqual(cookies[AUTH_COOKIE], AUTH_TOKEN);
+}
+
+function hasWriteAccess(req) {
+  if (hasPortalAccess(req)) return true;
+  if (!PUBLISH_TOKEN) return false;
+  const auth = String(req.header('authorization') || '');
+  if (!auth.startsWith('Bearer ')) return false;
+  return secureEqual(auth.slice(7), PUBLISH_TOKEN);
 }
 
 function isPrivateBypass(req) {
@@ -108,20 +161,57 @@ app.get('/api/auth/status', (req, res) => {
 app.post('/api/auth/unlock', (req, res) => {
   if (!PORTAL_PASSWORD) return res.json({ ok: true, required: false });
 
+  const limit = isAuthLimited(req);
+  if (limit.limited) {
+    return res.status(429).json({ ok: false, error: 'too_many_attempts', retry_after_ms: limit.retryAfterMs });
+  }
+
   const password = String(req.body?.password || '');
-  if (password !== PORTAL_PASSWORD) {
+  if (!secureEqual(password, PORTAL_PASSWORD)) {
+    markAuthFailure(req);
     return res.status(401).json({ ok: false, error: 'invalid_password' });
   }
 
-  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=${encodeURIComponent(AUTH_TOKEN)}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax`);
+  clearAuthFailure(req);
+
+  const proto = String(req.headers['x-forwarded-proto'] || '').toLowerCase();
+  const secureFlag = (req.secure || proto.includes('https')) ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=${encodeURIComponent(AUTH_TOKEN)}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax${secureFlag}`);
   return res.json({ ok: true });
 });
 
+app.put('/api/note/:name', (req, res) => {
+  if (!hasWriteAccess(req)) return res.status(401).json({ error: 'unauthorized' });
+
+  const name = safeName(req.params.name);
+  if (!name) return res.status(400).json({ error: 'invalid_note_name' });
+
+  const full = path.join(NOTES_DIR, name);
+  if (!fs.existsSync(full)) return res.status(404).json({ error: 'not_found' });
+
+  const markdown = String(req.body?.markdown || '');
+  if (!markdown.trim()) return res.status(400).json({ error: 'empty_markdown' });
+
+  fs.writeFileSync(full, markdown, 'utf8');
+  const stat = fs.statSync(full);
+  return res.json({ ok: true, name, size: stat.size, mtimeMs: stat.mtimeMs });
+});
+
+app.delete('/api/note/:name', (req, res) => {
+  if (!hasWriteAccess(req)) return res.status(401).json({ error: 'unauthorized' });
+
+  const name = safeName(req.params.name);
+  if (!name) return res.status(400).json({ error: 'invalid_note_name' });
+
+  const full = path.join(NOTES_DIR, name);
+  if (!fs.existsSync(full)) return res.status(404).json({ error: 'not_found' });
+
+  fs.unlinkSync(full);
+  return res.json({ ok: true, deleted: name });
+});
+
 app.post('/api/publish', (req, res) => {
-  if (PUBLISH_TOKEN) {
-    const auth = req.header('authorization') || '';
-    if (auth !== `Bearer ${PUBLISH_TOKEN}`) return res.status(401).json({ error: 'unauthorized' });
-  }
+  if (!hasWriteAccess(req)) return res.status(401).json({ error: 'unauthorized' });
 
   const titleRaw = String(req.body?.title || 'note').trim();
   const markdown = String(req.body?.markdown || '');

@@ -12,8 +12,9 @@ md-portal turns them into a simple reading experience with private link support 
 - Clean monochrome reading UI
 - One click share for private note links
 - Root portal password gate with blur lock screen
-- Private note links that open directly
-- Download button for original markdown file
+- Signed private links for direct document access
+- Download and delete actions in the portal UI
+- API support to edit markdown in place without generating a new link
 - Fast publish flow for daily reports and docs
 
 ## Use cases

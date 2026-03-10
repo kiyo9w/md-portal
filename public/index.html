@@ -121,6 +121,15 @@
     .btn-secondary:hover {
       background: #f2f2f2;
     }
+    .btn-danger {
+      background: #fff;
+      color: #9b1313;
+      border-color: #d9b3b3;
+    }
+    .btn-danger:hover {
+      background: #fff5f5;
+      border-color: #c98f8f;
+    }
 
     .content {
       overflow: auto;
@@ -253,6 +262,7 @@
         <div id="activeTitle" class="title">No note selected</div>
         <div class="actions">
           <button id="downloadFile" class="btn btn-secondary">Download</button>
+          <button id="deleteFile" class="btn btn-danger">Delete</button>
           <button id="copyLink" class="btn">Copy link</button>
         </div>
       </div>
@@ -277,6 +287,18 @@
     </div>
   </div>
 
+  <div id="deleteOverlay" class="auth-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="deleteTitle">
+    <div class="auth-modal">
+      <h2 id="deleteTitle" class="auth-title">Delete this file?</h2>
+      <p id="deleteDesc" class="auth-desc">This action will remove the markdown file from the portal.</p>
+      <div class="auth-row">
+        <button id="deleteCancel" class="btn btn-secondary" type="button">Cancel</button>
+        <button id="deleteConfirm" class="btn btn-danger" type="button">Delete file</button>
+      </div>
+      <div id="deleteError" class="auth-error"></div>
+    </div>
+  </div>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.12/marked.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -287,10 +309,16 @@
     const titleEl = document.getElementById('activeTitle');
     const copyBtn = document.getElementById('copyLink');
     const downloadBtn = document.getElementById('downloadFile');
+    const deleteBtn = document.getElementById('deleteFile');
     const authOverlay = document.getElementById('authOverlay');
     const authPassword = document.getElementById('authPassword');
     const authSubmit = document.getElementById('authSubmit');
     const authError = document.getElementById('authError');
+    const deleteOverlay = document.getElementById('deleteOverlay');
+    const deleteDesc = document.getElementById('deleteDesc');
+    const deleteCancel = document.getElementById('deleteCancel');
+    const deleteConfirm = document.getElementById('deleteConfirm');
+    const deleteError = document.getElementById('deleteError');
 
     const isPrivateMode = location.pathname.startsWith('/private');
 
@@ -329,6 +357,7 @@
     }
 
     function lockPortal() {
+      closeDeleteModal();
       document.body.classList.add('locked');
       authOverlay.classList.remove('hidden');
       authError.textContent = '';
@@ -340,6 +369,18 @@
       authOverlay.classList.add('hidden');
       authError.textContent = '';
       authPassword.value = '';
+    }
+
+    function openDeleteModal() {
+      if (!currentNote) return;
+      deleteError.textContent = '';
+      deleteDesc.textContent = `You are about to delete ${currentNote}. This cannot be undone.`;
+      deleteOverlay.classList.remove('hidden');
+    }
+
+    function closeDeleteModal() {
+      deleteOverlay.classList.add('hidden');
+      deleteError.textContent = '';
     }
 
     function renderList() {
@@ -373,10 +414,26 @@
       const data = await res.json();
       notes = data.notes || [];
       const fromUrl = qNote();
-      if (fromUrl && notes.some(n => n.name === fromUrl)) currentNote = fromUrl;
-      else if (!currentNote && notes[0]) currentNote = notes[0].name;
+
+      if (fromUrl && notes.some(n => n.name === fromUrl)) {
+        currentNote = fromUrl;
+      } else if (currentNote && notes.some(n => n.name === currentNote)) {
+        // keep current
+      } else {
+        currentNote = notes[0]?.name || '';
+      }
+
       renderList();
-      if (currentNote) await loadNote(currentNote, false);
+
+      if (currentNote) {
+        await loadNote(currentNote, false);
+      } else {
+        currentMarkdown = '';
+        mdEl.innerHTML = '';
+        emptyEl.style.display = 'block';
+        emptyEl.innerHTML = 'No documents available yet.';
+        titleEl.textContent = 'No note selected';
+      }
     }
 
     async function loadNote(name, pushQuery = true) {
@@ -388,9 +445,14 @@
           : '?private=1';
       }
       const res = await fetch('/api/note/' + encodeURIComponent(name) + suffix);
+      if (res.status === 401 && !isPrivateMode) {
+        lockPortal();
+      }
       if (!res.ok) {
         emptyEl.style.display = 'block';
-        emptyEl.innerHTML = 'Không tải được nội dung note. Kiểm tra lại link.';
+        emptyEl.innerHTML = isPrivateMode
+          ? 'Unable to open this private link. The token may be missing or invalid.'
+          : 'Không tải được nội dung note. Kiểm tra lại link.';
         mdEl.innerHTML = '';
         return;
       }
@@ -422,6 +484,51 @@
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+    });
+
+    deleteBtn.addEventListener('click', () => {
+      if (isPrivateMode || !currentNote) return;
+      openDeleteModal();
+    });
+
+    deleteCancel.addEventListener('click', () => {
+      closeDeleteModal();
+    });
+
+    deleteOverlay.addEventListener('click', (ev) => {
+      if (ev.target === deleteOverlay) closeDeleteModal();
+    });
+
+    deleteConfirm.addEventListener('click', async () => {
+      if (!currentNote) return;
+      deleteConfirm.disabled = true;
+      const prevLabel = deleteConfirm.textContent;
+      deleteConfirm.textContent = 'Deleting...';
+      deleteError.textContent = '';
+      try {
+        const res = await fetch('/api/note/' + encodeURIComponent(currentNote), { method: 'DELETE' });
+        if (res.status === 401) {
+          closeDeleteModal();
+          lockPortal();
+          return;
+        }
+        if (!res.ok) {
+          deleteError.textContent = 'Unable to delete file. Please try again.';
+          return;
+        }
+
+        const deletedName = currentNote;
+        closeDeleteModal();
+        if (qNote() === deletedName) setQuery('');
+        currentNote = '';
+        currentMarkdown = '';
+        await loadNotes();
+      } catch (_e) {
+        deleteError.textContent = 'Unable to delete file. Please try again.';
+      } finally {
+        deleteConfirm.disabled = false;
+        deleteConfirm.textContent = prevLabel;
+      }
     });
 
     authSubmit.addEventListener('click', async () => {
@@ -460,6 +567,7 @@
     async function init() {
       if (isPrivateMode) {
         document.body.classList.add('private-mode');
+        deleteBtn.style.display = 'none';
         const note = qNote();
         if (!note) {
           titleEl.textContent = 'Private note';
@@ -479,7 +587,8 @@
       await loadNotes();
     }
 
-    init().catch(() => {
+    init().catch((err) => {
+      if (err && err.message === 'auth_required') return;
       emptyEl.innerHTML = 'Không tải được dữ liệu note. Kiểm tra server.';
     });
   </script>
