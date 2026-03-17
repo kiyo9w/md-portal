@@ -441,10 +441,17 @@
       return new URLSearchParams(location.search).get('code') || '';
     }
 
-    function setQuery(note) {
+    function qPath() {
+      return new URLSearchParams(location.search).get('path') || '';
+    }
+
+    function setQuery(note, filePath = '') {
       const u = new URL(location.href);
       if (note) u.searchParams.set('note', note);
       else u.searchParams.delete('note');
+
+      if (filePath) u.searchParams.set('path', filePath);
+      else u.searchParams.delete('path');
 
       if (authMode === 'code' && currentCode) u.searchParams.set('code', currentCode);
       else u.searchParams.delete('code');
@@ -542,12 +549,12 @@
             await loadNote(value, true);
             return;
           }
-          await openAccessFile(value);
+          await openAccessFile(value, true);
         });
       });
     }
 
-    async function openAccessFile(rel) {
+    async function openAccessFile(rel, pushQuery = true) {
       const res = await fetch('/api/access/file-read?path=' + encodeURIComponent(rel));
       if (res.status === 401) {
         lockPortal();
@@ -570,6 +577,7 @@
       titleEl.textContent = data.path;
       currentMarkdown = body;
       currentNote = data.name;
+      if (pushQuery) setQuery('', data.path || rel);
     }
 
     async function checkAuthStatus() {
@@ -596,12 +604,17 @@
           const rd = await r.json();
           scopedResources = rd.resources || [];
           renderScopedResources();
-          const fromUrl = qNote();
-          const selected = (fromUrl && scopedResources.find((x) => x.type === 'note' && x.value === fromUrl))
+
+          const fromUrlNote = qNote();
+          const fromUrlPath = qPath();
+          const selected =
+            (fromUrlNote && scopedResources.find((x) => x.type === 'note' && x.value === fromUrlNote))
+            || (fromUrlPath && scopedResources.find((x) => x.type === 'file' && x.value === fromUrlPath))
             || scopedResources[0];
+
           if (selected) {
             if (selected.type === 'note') await loadNote(selected.value, true);
-            else await openAccessFile(selected.value);
+            else await openAccessFile(selected.value, true);
           }
           return;
         }
@@ -976,24 +989,26 @@
       authMode = auth.mode || (auth.unlocked ? 'admin' : 'locked');
       currentCode = qCode() || '';
 
-      if (auth.required && !auth.unlocked) {
-        if (currentCode) {
-          try {
-            const r = await fetch('/api/auth/unlock', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ password: currentCode })
-            });
-            if (r.ok) {
-              const data = await r.json();
-              authMode = data.mode || 'admin';
-              applyModeUi();
-              await loadNotes();
-              return;
-            }
-          } catch (_e) {
+      if (currentCode) {
+        try {
+          const r = await fetch('/api/auth/unlock', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: currentCode })
+          });
+          if (r.ok) {
+            const data = await r.json();
+            authMode = data.mode || 'admin';
+            if (authMode !== 'code') currentCode = '';
+            applyModeUi();
+            await loadNotes();
+            return;
           }
+        } catch (_e) {
         }
+      }
+
+      if (auth.required && !auth.unlocked) {
         lockPortal();
         return;
       }
