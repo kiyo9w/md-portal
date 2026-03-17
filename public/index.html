@@ -416,6 +416,7 @@
     let currentFsDir = '';
     let authMode = 'locked';
     let scopedResources = [];
+    let currentCode = '';
 
     marked.setOptions({
       gfm: true,
@@ -436,11 +437,26 @@
       return new URLSearchParams(location.search).get('token') || '';
     }
 
+    function qCode() {
+      return new URLSearchParams(location.search).get('code') || '';
+    }
+
     function setQuery(note) {
       const u = new URL(location.href);
       if (note) u.searchParams.set('note', note);
       else u.searchParams.delete('note');
+
+      if (authMode === 'code' && currentCode) u.searchParams.set('code', currentCode);
+      else u.searchParams.delete('code');
+
       history.replaceState({}, '', u.toString());
+    }
+
+    function applyModeUi() {
+      const codeMode = authMode === 'code';
+      openFsBtn.style.display = codeMode ? 'none' : '';
+      deleteBtn.style.display = codeMode ? 'none' : '';
+      openAccessAdminBtn.style.display = codeMode ? 'none' : '';
     }
 
     function fmtDate(ms) {
@@ -523,7 +539,7 @@
           const type = el.dataset.kind;
           const value = el.dataset.value;
           if (type === 'note') {
-            await loadNote(value, false);
+            await loadNote(value, true);
             return;
           }
           await openAccessFile(value);
@@ -580,10 +596,12 @@
           const rd = await r.json();
           scopedResources = rd.resources || [];
           renderScopedResources();
-          const first = scopedResources[0];
-          if (first) {
-            if (first.type === 'note') await loadNote(first.value, false);
-            else await openAccessFile(first.value);
+          const fromUrl = qNote();
+          const selected = (fromUrl && scopedResources.find((x) => x.type === 'note' && x.value === fromUrl))
+            || scopedResources[0];
+          if (selected) {
+            if (selected.type === 'note') await loadNote(selected.value, true);
+            else await openAccessFile(selected.value);
           }
           return;
         }
@@ -642,7 +660,7 @@
       } else {
         renderList();
       }
-      if (pushQuery && authMode !== 'code') setQuery(data.name);
+      if (pushQuery) setQuery(data.name);
     }
 
     function renderFsList(data) {
@@ -921,6 +939,9 @@
         }
         const data = await res.json();
         authMode = data.mode || 'admin';
+        if (authMode === 'code') currentCode = password;
+        else currentCode = '';
+        applyModeUi();
         unlockPortalUi();
         await loadNotes();
       } catch (_e) {
@@ -953,21 +974,31 @@
 
       const auth = await checkAuthStatus();
       authMode = auth.mode || (auth.unlocked ? 'admin' : 'locked');
+      currentCode = qCode() || '';
+
       if (auth.required && !auth.unlocked) {
+        if (currentCode) {
+          try {
+            const r = await fetch('/api/auth/unlock', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ password: currentCode })
+            });
+            if (r.ok) {
+              const data = await r.json();
+              authMode = data.mode || 'admin';
+              applyModeUi();
+              await loadNotes();
+              return;
+            }
+          } catch (_e) {
+          }
+        }
         lockPortal();
         return;
       }
 
-      if (authMode === 'code') {
-        openFsBtn.style.display = 'none';
-        deleteBtn.style.display = 'none';
-        openAccessAdminBtn.style.display = 'none';
-      } else {
-        openFsBtn.style.display = '';
-        deleteBtn.style.display = '';
-        openAccessAdminBtn.style.display = '';
-      }
-
+      applyModeUi();
       await loadNotes();
     }
 
