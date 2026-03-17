@@ -167,6 +167,41 @@
       color: var(--muted);
       text-align: center;
     }
+    .hidden { display: none !important; }
+    .fs-panel {
+      max-width: 920px;
+      margin: 0 auto 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fafafa;
+      padding: 10px;
+    }
+    .fs-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .fs-input {
+      flex: 1;
+      min-width: 240px;
+      border: 1px solid #d8d8d8;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 13px;
+    }
+    .fs-list {
+      margin-top: 8px;
+      max-height: 180px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 6px;
+    }
+    .fs-item {
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      border: 1px solid transparent;
+    }
+    .fs-item:hover { background: #f3f3f3; border-color: var(--line); }
 
     .auth-overlay {
       position: fixed;
@@ -261,12 +296,46 @@
       <div class="toolbar">
         <div id="activeTitle" class="title">No note selected</div>
         <div class="actions">
+          <button id="openAccessAdmin" class="btn btn-secondary">Access admin</button>
+          <button id="openFs" class="btn btn-secondary">Open path</button>
           <button id="downloadFile" class="btn btn-secondary">Download</button>
           <button id="deleteFile" class="btn btn-danger">Delete</button>
           <button id="copyLink" class="btn">Copy link</button>
         </div>
       </div>
       <div class="content">
+        <div id="accessPanel" class="fs-panel hidden">
+          <div class="fs-row" style="align-items:flex-start;">
+            <div style="flex:1;min-width:260px;">
+              <div style="font-weight:600;margin-bottom:6px;">Create access code</div>
+              <input id="codeLabel" class="fs-input" placeholder="Label (ví dụ: LLM Checker external)" style="margin-bottom:8px;" />
+              <input id="codeValue" class="fs-input" placeholder="Code (ví dụ: LLM_Checker@!)" style="margin-bottom:8px;" />
+              <textarea id="codeResources" class="fs-input" rows="5" placeholder="Resources, mỗi dòng 1 item:\nnote:2026-03-10T16-24-11Z-llm_output_checker_eval_guide_vi.md\nfile:media/inbound/summary_stats_1773137348---a86fb7a0-e14b-4099-95fc-c601bc6e9212.csv"></textarea>
+              <div class="auth-row" style="margin-top:8px;">
+                <button id="codeCreateBtn" class="btn" type="button">Create code</button>
+                <button id="codeRefreshBtn" class="btn btn-secondary" type="button">Refresh</button>
+                <button id="codePanelCloseBtn" class="btn btn-secondary" type="button">Close</button>
+              </div>
+              <div id="codeAdminHint" class="note-meta" style="margin-top:8px;"></div>
+            </div>
+            <div style="flex:1;min-width:260px;">
+              <div style="font-weight:600;margin-bottom:6px;">Existing codes</div>
+              <div id="codeList" class="fs-list" style="max-height:220px;"></div>
+              <div style="font-weight:600;margin:12px 0 6px;">Recent access events</div>
+              <div id="codeEventList" class="fs-list" style="max-height:220px;"></div>
+            </div>
+          </div>
+        </div>
+        <div id="fsPanel" class="fs-panel hidden">
+          <div class="fs-row">
+            <input id="fsPath" class="fs-input" placeholder="Nhập path tương đối, ví dụ memory/projects.md" />
+            <button id="fsOpenBtn" class="btn" type="button">Open</button>
+            <button id="fsUpBtn" class="btn btn-secondary" type="button">Up</button>
+            <button id="fsCloseBtn" class="btn btn-secondary" type="button">Close</button>
+          </div>
+          <div id="fsHint" class="note-meta" style="margin-top:8px;">Chỉ đọc file text trong workspace. Một số path nhạy cảm sẽ bị chặn.</div>
+          <div id="fsList" class="fs-list"></div>
+        </div>
         <article id="markdown" class="markdown-body"></article>
         <div id="empty" class="empty">
           Chọn một note bên trái để xem.<br/>URL dạng <code>?note=&lt;file.md&gt;</code> cũng mở trực tiếp được.
@@ -310,6 +379,25 @@
     const copyBtn = document.getElementById('copyLink');
     const downloadBtn = document.getElementById('downloadFile');
     const deleteBtn = document.getElementById('deleteFile');
+    const openFsBtn = document.getElementById('openFs');
+    const openAccessAdminBtn = document.getElementById('openAccessAdmin');
+    const accessPanel = document.getElementById('accessPanel');
+    const codeLabel = document.getElementById('codeLabel');
+    const codeValue = document.getElementById('codeValue');
+    const codeResources = document.getElementById('codeResources');
+    const codeCreateBtn = document.getElementById('codeCreateBtn');
+    const codeRefreshBtn = document.getElementById('codeRefreshBtn');
+    const codePanelCloseBtn = document.getElementById('codePanelCloseBtn');
+    const codeAdminHint = document.getElementById('codeAdminHint');
+    const codeList = document.getElementById('codeList');
+    const codeEventList = document.getElementById('codeEventList');
+    const fsPanel = document.getElementById('fsPanel');
+    const fsPathInput = document.getElementById('fsPath');
+    const fsOpenBtn = document.getElementById('fsOpenBtn');
+    const fsUpBtn = document.getElementById('fsUpBtn');
+    const fsCloseBtn = document.getElementById('fsCloseBtn');
+    const fsHint = document.getElementById('fsHint');
+    const fsList = document.getElementById('fsList');
     const authOverlay = document.getElementById('authOverlay');
     const authPassword = document.getElementById('authPassword');
     const authSubmit = document.getElementById('authSubmit');
@@ -325,6 +413,9 @@
     let currentNote = '';
     let currentMarkdown = '';
     let notes = [];
+    let currentFsDir = '';
+    let authMode = 'locked';
+    let scopedResources = [];
 
     marked.setOptions({
       gfm: true,
@@ -397,6 +488,74 @@
       });
     }
 
+    function parseResourceLines(raw) {
+      const rows = String(raw || '').split('\n').map((x) => x.trim()).filter(Boolean);
+      const out = [];
+      for (const line of rows) {
+        const i = line.indexOf(':');
+        if (i < 0) continue;
+        const type = line.slice(0, i).trim();
+        const value = line.slice(i + 1).trim();
+        if (!value) continue;
+        if (type === 'note' || type === 'file') out.push({ type, value });
+      }
+      return out;
+    }
+
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
+    }
+
+    function renderScopedResources() {
+      if (authMode !== 'code') return;
+      if (!scopedResources.length) {
+        listEl.innerHTML = '<div class="note-item">No resources for this code.</div>';
+        return;
+      }
+      listEl.innerHTML = scopedResources.map((r, idx) => `
+        <div class="note-item" data-kind="${r.type}" data-value="${escapeHtml(r.value)}">
+          <div class="note-name">${r.type === 'note' ? '📄' : '🗂️'} ${escapeHtml(r.value)}</div>
+          <div class="note-meta">${r.type}</div>
+        </div>
+      `).join('');
+      listEl.querySelectorAll('.note-item').forEach((el) => {
+        el.addEventListener('click', async () => {
+          const type = el.dataset.kind;
+          const value = el.dataset.value;
+          if (type === 'note') {
+            await loadNote(value, false);
+            return;
+          }
+          await openAccessFile(value);
+        });
+      });
+    }
+
+    async function openAccessFile(rel) {
+      const res = await fetch('/api/access/file-read?path=' + encodeURIComponent(rel));
+      if (res.status === 401) {
+        lockPortal();
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        emptyEl.style.display = 'block';
+        emptyEl.innerHTML = 'Không mở được file được share.';
+        mdEl.innerHTML = '';
+        return;
+      }
+      const body = String(data.content || '');
+      if (String(data.name || '').toLowerCase().endsWith('.md')) {
+        mdEl.innerHTML = DOMPurify.sanitize(marked.parse(body));
+      } else {
+        mdEl.innerHTML = `<pre>${escapeHtml(body)}</pre>`;
+      }
+      emptyEl.style.display = 'none';
+      titleEl.textContent = data.path;
+      currentMarkdown = body;
+      currentNote = data.name;
+    }
+
     async function checkAuthStatus() {
       const res = await fetch('/api/auth/status');
       if (!res.ok) return { required: false, unlocked: true };
@@ -413,12 +572,27 @@
 
       const data = await res.json();
       notes = data.notes || [];
-      const fromUrl = qNote();
+      authMode = data.scope === 'code' ? 'code' : 'admin';
 
+      if (authMode === 'code') {
+        const r = await fetch('/api/access/resources');
+        if (r.ok) {
+          const rd = await r.json();
+          scopedResources = rd.resources || [];
+          renderScopedResources();
+          const first = scopedResources[0];
+          if (first) {
+            if (first.type === 'note') await loadNote(first.value, false);
+            else await openAccessFile(first.value);
+          }
+          return;
+        }
+      }
+
+      const fromUrl = qNote();
       if (fromUrl && notes.some(n => n.name === fromUrl)) {
         currentNote = fromUrl;
       } else if (currentNote && notes.some(n => n.name === currentNote)) {
-        // keep current
       } else {
         currentNote = notes[0]?.name || '';
       }
@@ -463,9 +637,165 @@
       mdEl.innerHTML = html;
       emptyEl.style.display = 'none';
       titleEl.textContent = data.name;
-      renderList();
-      if (pushQuery) setQuery(data.name);
+      if (authMode === 'code') {
+        renderScopedResources();
+      } else {
+        renderList();
+      }
+      if (pushQuery && authMode !== 'code') setQuery(data.name);
     }
+
+    function renderFsList(data) {
+      const items = data?.items || [];
+      currentFsDir = data?.path || '';
+      fsPathInput.value = currentFsDir;
+      if (!items.length) {
+        fsList.innerHTML = '<div class="fs-item">(empty)</div>';
+        return;
+      }
+      fsList.innerHTML = items.map((it) => `
+        <div class="fs-item" data-path="${it.path}" data-type="${it.type}" data-allowed="${it.allowedText ? '1' : '0'}">
+          ${it.type === 'dir' ? '📁' : '📄'} ${it.name}
+        </div>
+      `).join('');
+
+      fsList.querySelectorAll('.fs-item').forEach((el) => {
+        el.addEventListener('click', async () => {
+          const p = el.dataset.path;
+          const t = el.dataset.type;
+          const allowed = el.dataset.allowed === '1';
+          if (t === 'dir') {
+            await browseFs(p);
+            return;
+          }
+          if (!allowed) {
+            fsHint.textContent = 'File type chưa được cho đọc trực tiếp.';
+            return;
+          }
+          await openFsPath(p);
+        });
+      });
+    }
+
+    async function browseFs(rel = '') {
+      const res = await fetch('/api/fs/list?path=' + encodeURIComponent(rel));
+      if (res.status === 401) {
+        lockPortal();
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        fsHint.textContent = 'Không mở được thư mục: ' + (data.error || 'unknown');
+        return;
+      }
+      fsHint.textContent = `Đang xem: ${data.path || '/'} (root: workspace)`;
+      renderFsList(data);
+    }
+
+    async function openFsPath(rel) {
+      const res = await fetch('/api/fs/read?path=' + encodeURIComponent(rel));
+      if (res.status === 401) {
+        lockPortal();
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        fsHint.textContent = 'Không mở được file: ' + (data.error || 'unknown');
+        return;
+      }
+      const isMd = String(data.name || '').toLowerCase().endsWith('.md');
+      const body = String(data.content || '');
+      if (isMd) {
+        mdEl.innerHTML = DOMPurify.sanitize(marked.parse(body));
+      } else {
+        mdEl.innerHTML = `<pre>${body.replace(/[&<>]/g, (m) => ({ '&':'&amp;','<':'&lt;','>':'&gt;' }[m]))}</pre>`;
+      }
+      emptyEl.style.display = 'none';
+      titleEl.textContent = data.path;
+      currentMarkdown = body;
+      currentNote = data.name;
+      await browseFs((data.path || '').split('/').slice(0, -1).join('/'));
+    }
+
+    async function refreshAccessAdmin() {
+      if (authMode !== 'admin') return;
+      const [codesRes, eventsRes] = await Promise.all([
+        fetch('/api/access-codes'),
+        fetch('/api/access-events'),
+      ]);
+      if (codesRes.ok) {
+        const data = await codesRes.json();
+        const rows = data.codes || [];
+        if (!rows.length) {
+          codeList.innerHTML = '<div class="fs-item">No access code yet.</div>';
+        } else {
+          codeList.innerHTML = rows.map((x) => {
+            const resources = (x.resources || []).map((r) => `${r.type}:${r.value}`).join('<br/>');
+            return `<div class="fs-item"><b>${escapeHtml(x.label || x.id)}</b> (${x.enabled ? 'enabled' : 'disabled'})<br/>code: ${escapeHtml(x.codePreview || '')}<br/>${resources}</div>`;
+          }).join('');
+        }
+      }
+      if (eventsRes.ok) {
+        const data = await eventsRes.json();
+        const rows = data.events || [];
+        if (!rows.length) {
+          codeEventList.innerHTML = '<div class="fs-item">No events yet.</div>';
+        } else {
+          codeEventList.innerHTML = rows.slice(0, 120).map((x) => `<div class="fs-item">${escapeHtml(x.at)} | ${escapeHtml(x.type)} | ${escapeHtml(x.value || '')} | ${x.ok ? 'ok' : 'fail'}</div>`).join('');
+        }
+      }
+    }
+
+    openAccessAdminBtn.addEventListener('click', async () => {
+      if (authMode !== 'admin') {
+        codeAdminHint.textContent = 'Admin only.';
+        accessPanel.classList.remove('hidden');
+        return;
+      }
+      accessPanel.classList.remove('hidden');
+      codeAdminHint.textContent = '';
+      await refreshAccessAdmin();
+    });
+
+    codePanelCloseBtn.addEventListener('click', () => {
+      accessPanel.classList.add('hidden');
+    });
+
+    codeRefreshBtn.addEventListener('click', async () => {
+      await refreshAccessAdmin();
+    });
+
+    codeCreateBtn.addEventListener('click', async () => {
+      if (authMode !== 'admin') return;
+      const code = (codeValue.value || '').trim();
+      const label = (codeLabel.value || '').trim();
+      const resources = parseResourceLines(codeResources.value);
+      if (!code || !resources.length) {
+        codeAdminHint.textContent = 'Cần code + ít nhất 1 resource.';
+        return;
+      }
+      codeCreateBtn.disabled = true;
+      codeAdminHint.textContent = 'Creating...';
+      try {
+        const res = await fetch('/api/access-codes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, label, resources }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          codeAdminHint.textContent = 'Create fail: ' + (data.error || 'unknown');
+          return;
+        }
+        codeAdminHint.textContent = 'Created.';
+        codeValue.value = '';
+        await refreshAccessAdmin();
+      } catch (_e) {
+        codeAdminHint.textContent = 'Create fail.';
+      } finally {
+        codeCreateBtn.disabled = false;
+      }
+    });
 
     copyBtn.addEventListener('click', async () => {
       await navigator.clipboard.writeText(location.href);
@@ -531,6 +861,45 @@
       }
     });
 
+    openFsBtn.addEventListener('click', async () => {
+      fsPanel.classList.remove('hidden');
+      await browseFs(currentFsDir || '');
+      fsPathInput.focus();
+    });
+
+    fsOpenBtn.addEventListener('click', async () => {
+      const p = (fsPathInput.value || '').trim();
+      if (!p) {
+        await browseFs('');
+        return;
+      }
+      if (p.endsWith('/')) {
+        await browseFs(p);
+        return;
+      }
+      const listTry = await fetch('/api/fs/list?path=' + encodeURIComponent(p));
+      if (listTry.ok) {
+        const d = await listTry.json();
+        renderFsList(d);
+        fsHint.textContent = `Đang xem: ${d.path || '/'} (root: workspace)`;
+        return;
+      }
+      await openFsPath(p);
+    });
+
+    fsUpBtn.addEventListener('click', async () => {
+      const p = (currentFsDir || '').split('/').slice(0, -1).join('/');
+      await browseFs(p);
+    });
+
+    fsCloseBtn.addEventListener('click', () => {
+      fsPanel.classList.add('hidden');
+    });
+
+    fsPathInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') fsOpenBtn.click();
+    });
+
     authSubmit.addEventListener('click', async () => {
       const password = authPassword.value || '';
       if (!password) {
@@ -550,6 +919,8 @@
           authError.textContent = 'Wrong code. Please try again.';
           return;
         }
+        const data = await res.json();
+        authMode = data.mode || 'admin';
         unlockPortalUi();
         await loadNotes();
       } catch (_e) {
@@ -568,6 +939,8 @@
       if (isPrivateMode) {
         document.body.classList.add('private-mode');
         deleteBtn.style.display = 'none';
+        openFsBtn.style.display = 'none';
+        openAccessAdminBtn.style.display = 'none';
         const note = qNote();
         if (!note) {
           titleEl.textContent = 'Private note';
@@ -579,9 +952,20 @@
       }
 
       const auth = await checkAuthStatus();
+      authMode = auth.mode || (auth.unlocked ? 'admin' : 'locked');
       if (auth.required && !auth.unlocked) {
         lockPortal();
         return;
+      }
+
+      if (authMode === 'code') {
+        openFsBtn.style.display = 'none';
+        deleteBtn.style.display = 'none';
+        openAccessAdminBtn.style.display = 'none';
+      } else {
+        openFsBtn.style.display = '';
+        deleteBtn.style.display = '';
+        openAccessAdminBtn.style.display = '';
       }
 
       await loadNotes();
