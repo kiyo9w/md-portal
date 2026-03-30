@@ -3,7 +3,7 @@
   admin off
 }
 
-md.openclaw.ngotrung.app {
+portal.ngotrung.app {
   encode zstd gzip
   reverse_proxy 127.0.0.1:18901
 
@@ -13,4 +13,8 @@ md.openclaw.ngotrung.app {
     X-Frame-Options "SAMEORIGIN"
     Referrer-Policy "strict-origin-when-cross-origin"
   }
+}
+
+md.openclaw.ngotrung.app {
+  redir https://portal.ngotrung.app{uri} 301
 }
